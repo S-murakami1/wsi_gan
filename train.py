@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import h5py
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image
@@ -10,28 +13,14 @@ from tqdm import tqdm
 from loguru import logger
 
 from config import config
-from generator import ResidualGenerator
 from discriminator import PatchDiscriminator
+from generator import ResidualGenerator
 from losses import discriminator_loss, generator_gan_loss, cycle_consistency_loss
-
-
-class H5PatchSampler:
-
-    def __init__(self, h5_path: Path, patches_key: str, device: torch.device):
-        self._device = device
-        self._f = h5py.File(h5_path, "r")
-        self._ds = self._f[patches_key]
-        self.n = self._ds.shape[0]
-
-    def sample(self) -> torch.Tensor:
-        i = int(torch.randint(0, self.n, (1,)).item())
-        patch = np.asarray(self._ds[i], dtype=np.uint8)
-        t = torch.from_numpy(patch).permute(2, 0, 1).float().unsqueeze(0) / 255.0
-        t = t * 2.0 - 1.0
-        return t.to(self._device)
-
-    def close(self) -> None:
-        self._f.close()
+from multi_h5_sampling import (
+    PatchIndexCatalog,
+    RandomMultiH5PatchSampler,
+    list_h5_paths,
+)
 
 
 def tensor_minus1_1_to_uint8_hwc(t: torch.Tensor) -> np.ndarray:
@@ -57,27 +46,83 @@ def save_generated_preview(
     return sub
 
 
+def save_training_checkpoint(
+    path: Path,
+    step: int,
+    G_xy: torch.nn.Module,
+    G_yx: torch.nn.Module,
+    D_x: torch.nn.Module,
+    D_y: torch.nn.Module,
+    optimizer_G: torch.optim.Optimizer,
+    optimizer_D: torch.optim.Optimizer,
+) -> None:
+    torch.save(
+        {
+            "step": step,
+            "G_xy": G_xy.state_dict(),
+            "G_yx": G_yx.state_dict(),
+            "D_x": D_x.state_dict(),
+            "D_y": D_y.state_dict(),
+            "optimizer_G": optimizer_G.state_dict(),
+            "optimizer_D": optimizer_D.state_dict(),
+        },
+        path,
+    )
+
+
+def save_loss_curve_png(
+    path: Path,
+    steps: list[int],
+    loss_G_hist: list[float],
+    loss_D_hist: list[float],
+) -> None:
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=120)
+    ax.plot(steps, loss_G_hist, label="loss_G", alpha=0.9, linewidth=0.8)
+    ax.plot(steps, loss_D_hist, label="loss_D", alpha=0.9, linewidth=0.8)
+    ax.set_xlabel("step")
+    ax.set_ylabel("loss")
+    ax.legend(loc="upper right")
+    ax.grid(True, alpha=0.35)
+    ax.set_title("Training losses (updated each save_every)")
+    fig.tight_layout()
+    fig.savefig(path, format="png")
+    plt.close(fig)
+
+
 def train() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_root = Path.cwd() / config.output_subdir
     out_root.mkdir(parents=True, exist_ok=True)
 
-    patho2_h5 = Path(config.patho2_patches_h5)
-    morph_h5 = Path(config.morph_patches_h5)
+    patho2_paths = list_h5_paths(Path(config.patho2_h5_dir), config.h5_glob)
+    morph_paths = list_h5_paths(Path(config.morph_h5_dir), config.h5_glob)
+    catalog_x = PatchIndexCatalog(patho2_paths, config.patches_key)
+    catalog_y = PatchIndexCatalog(morph_paths, config.patches_key)
 
     logger.info(
-        "train start | device={} | steps={} | save_every={} | cwd={} | out={} | patho2={} | morph={}",
+        "train start | device={} | steps={} | save_every={} | cwd={} | out={} | "
+        "patho2_dir={} ({} files, {} patches) | morph_dir={} ({} files, {} patches) | "
+        "h5_max_open={}",
         device,
         config.total_steps,
         config.save_every,
         Path.cwd(),
         out_root.resolve(),
-        patho2_h5,
-        morph_h5,
+        Path(config.patho2_h5_dir).resolve(),
+        len(patho2_paths),
+        catalog_x.total_patches,
+        Path(config.morph_h5_dir).resolve(),
+        len(morph_paths),
+        catalog_y.total_patches,
+        config.h5_max_open_files,
     )
 
-    sampler_x = H5PatchSampler(patho2_h5, config.patches_key, device)
-    sampler_y = H5PatchSampler(morph_h5, config.patches_key, device)
+    sampler_x = RandomMultiH5PatchSampler(
+        catalog_x, config.patches_key, device, config.h5_max_open_files
+    )
+    sampler_y = RandomMultiH5PatchSampler(
+        catalog_y, config.patches_key, device, config.h5_max_open_files
+    )
 
     try:
         G_xy = ResidualGenerator().to(device)
@@ -100,6 +145,11 @@ def train() -> None:
         G_yx.train()
         D_x.train()
         D_y.train()
+
+        hist_step: list[int] = []
+        hist_loss_G: list[float] = []
+        hist_loss_D: list[float] = []
+        loss_plot_path = out_root / config.loss_curve_png
 
         pbar = tqdm(range(1, config.total_steps + 1), desc="train", unit="step")
         for step in pbar:
@@ -133,23 +183,39 @@ def train() -> None:
             loss_D.backward()
             optimizer_D.step()
 
-            pbar.set_postfix(
-                G=float(loss_G.detach().cpu()),
-                D=float(loss_D.detach().cpu()),
-                refresh=False,
-            )
+            g_val = float(loss_G.detach().cpu())
+            d_val = float(loss_D.detach().cpu())
+            hist_step.append(step)
+            hist_loss_G.append(g_val)
+            hist_loss_D.append(d_val)
+
+            pbar.set_postfix(G=g_val, D=d_val, refresh=False)
 
             if step % config.save_every == 0:
                 with torch.no_grad():
                     fx = G_yx(y)
                     fy = G_xy(x)
                 sub = save_generated_preview(out_root, step, x, y, fy, fx)
-                logger.info(
-                    "step {} | loss_G={:.6f} loss_D={:.6f} | saved {}",
+                ckpt_path = sub / "checkpoint.pt"
+                save_training_checkpoint(
+                    ckpt_path,
                     step,
-                    float(loss_G.detach().cpu()),
-                    float(loss_D.detach().cpu()),
+                    G_xy,
+                    G_yx,
+                    D_x,
+                    D_y,
+                    optimizer_G,
+                    optimizer_D,
+                )
+                save_loss_curve_png(loss_plot_path, hist_step, hist_loss_G, hist_loss_D)
+                logger.info(
+                    "step {} | loss_G={:.6f} loss_D={:.6f} | previews={} | checkpoint={} | loss_plot={}",
+                    step,
+                    g_val,
+                    d_val,
                     sub.resolve(),
+                    ckpt_path.resolve(),
+                    loss_plot_path.resolve(),
                 )
 
     finally:
