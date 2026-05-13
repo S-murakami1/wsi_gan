@@ -85,6 +85,13 @@ class RandomMultiH5PatchSampler:
         t = t * 2.0 - 1.0
         return t.to(self._device)
 
+    def sample_batch(self, batch_size: int) -> torch.Tensor:
+        """Stack ``batch_size`` independent random patches as ``(B, 3, H, W)``."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        chunks = [self.sample() for _ in range(batch_size)]
+        return torch.cat(chunks, dim=0)
+
     def close(self) -> None:
         for h5 in self._handles.values():
             h5.close()

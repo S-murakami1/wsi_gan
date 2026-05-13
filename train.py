@@ -37,12 +37,13 @@ def save_generated_preview(
     fake_y: torch.Tensor,
     fake_x: torch.Tensor,
 ) -> Path:
+    """Save first item of each batch as PNG (batch dim may be > 1)."""
     sub = out_dir / f"step_{step:06d}"
     sub.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(tensor_minus1_1_to_uint8_hwc(x)).save(sub / "x_real.png")
-    Image.fromarray(tensor_minus1_1_to_uint8_hwc(y)).save(sub / "y_real.png")
-    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_y)).save(sub / "fake_y_Gxy.png")
-    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_x)).save(sub / "fake_x_Gyx.png")
+    Image.fromarray(tensor_minus1_1_to_uint8_hwc(x[0:1])).save(sub / "x_real.png")
+    Image.fromarray(tensor_minus1_1_to_uint8_hwc(y[0:1])).save(sub / "y_real.png")
+    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_y[0:1])).save(sub / "fake_y_Gxy.png")
+    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_x[0:1])).save(sub / "fake_x_Gyx.png")
     return sub
 
 
@@ -100,12 +101,15 @@ def train() -> None:
     catalog_y = PatchIndexCatalog(morph_paths, config.patches_key)
 
     logger.info(
-        "train start | device={} | steps={} | save_every={} | cwd={} | out={} | "
-        "patho2_dir={} ({} files, {} patches) | morph_dir={} ({} files, {} patches) | "
-        "h5_max_open={}",
+        "train start | device={} | batch_size={} | steps={} | save_every={} | "
+        "G_steps={} | D_steps={} | cwd={} | out={} | patho2_dir={} ({} files, {} patches) | "
+        "morph_dir={} ({} files, {} patches) | h5_max_open={}",
         device,
+        int(config.batch_size),
         config.total_steps,
         config.save_every,
+        int(config.generator_steps),
+        int(config.discriminator_steps),
         Path.cwd(),
         out_root.resolve(),
         Path(config.patho2_h5_dir).resolve(),
@@ -151,40 +155,49 @@ def train() -> None:
         hist_loss_D: list[float] = []
         loss_plot_path = out_root / config.loss_curve_png
 
+        bs = max(1, int(config.batch_size))
+        g_steps = max(1, int(config.generator_steps))
+        d_steps = max(1, int(config.discriminator_steps))
         pbar = tqdm(range(1, config.total_steps + 1), desc="train", unit="step")
         for step in pbar:
-            x = sampler_x.sample()
-            y = sampler_y.sample()
+            loss_G_last: torch.Tensor | None = None
+            for _ in range(g_steps):
+                x = sampler_x.sample_batch(bs)
+                y = sampler_y.sample_batch(bs)
+                fake_y = G_xy(x)
+                rec_x = G_yx(fake_y)
+                fake_x = G_yx(y)
+                rec_y = G_xy(fake_x)
+                loss_gan_xy = generator_gan_loss(D_y, fake_y)
+                loss_gan_yx = generator_gan_loss(D_x, fake_x)
+                loss_cycle_x = cycle_consistency_loss(x, rec_x)
+                loss_cycle_y = cycle_consistency_loss(y, rec_y)
+                loss_G = (
+                    config.lambda_gan * (loss_gan_xy + loss_gan_yx)
+                    + config.lambda_cycle * (loss_cycle_x + loss_cycle_y)
+                )
+                optimizer_G.zero_grad()
+                loss_G.backward()
+                optimizer_G.step()
+                loss_G_last = loss_G
 
-            fake_y = G_xy(x)
-            rec_x = G_yx(fake_y)
-            fake_x = G_yx(y)
-            rec_y = G_xy(fake_x)
+            loss_D_last: torch.Tensor | None = None
+            for _ in range(d_steps):
+                x = sampler_x.sample_batch(bs)
+                y = sampler_y.sample_batch(bs)
+                fake_y = G_xy(x)
+                fake_x = G_yx(y)
+                loss_D_y = discriminator_loss(D_y, y, fake_y)
+                loss_D_x = discriminator_loss(D_x, x, fake_x)
+                loss_D = config.lambda_discriminator * (loss_D_x + loss_D_y)
+                optimizer_D.zero_grad()
+                loss_D.backward()
+                optimizer_D.step()
+                loss_D_last = loss_D
 
-            loss_gan_xy = generator_gan_loss(D_y, fake_y)
-            loss_gan_yx = generator_gan_loss(D_x, fake_x)
-            loss_cycle_x = cycle_consistency_loss(x, rec_x)
-            loss_cycle_y = cycle_consistency_loss(y, rec_y)
-
-            loss_G = (
-                config.lambda_gan * (loss_gan_xy + loss_gan_yx)
-                + config.lambda_cycle * (loss_cycle_x + loss_cycle_y)
-            )
-
-            optimizer_G.zero_grad()
-            loss_G.backward()
-            optimizer_G.step()
-
-            loss_D_y = discriminator_loss(D_y, y, fake_y)
-            loss_D_x = discriminator_loss(D_x, x, fake_x)
-            loss_D = config.lambda_discriminator * (loss_D_x + loss_D_y)
-
-            optimizer_D.zero_grad()
-            loss_D.backward()
-            optimizer_D.step()
-
-            g_val = float(loss_G.detach().cpu())
-            d_val = float(loss_D.detach().cpu())
+            assert loss_G_last is not None and loss_D_last is not None
+            g_val = float(loss_G_last.detach().cpu())
+            d_val = float(loss_D_last.detach().cpu())
             hist_step.append(step)
             hist_loss_G.append(g_val)
             hist_loss_D.append(d_val)
