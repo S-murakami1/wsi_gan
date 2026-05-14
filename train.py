@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import matplotlib
@@ -90,6 +91,20 @@ def save_loss_curve_png(
     plt.close(fig)
 
 
+def _lr_schedule_multiplier(step: int, total_steps: int, kind: str, end_ratio: float) -> float:
+    """Return multiplier in [end_ratio, 1] applied to initial Adam lrs (step is 1-based)."""
+    k = (kind or "none").strip().lower()
+    if k == "none" or total_steps <= 1:
+        return 1.0
+    if k not in {"linear", "cosine"}:
+        raise ValueError(f"Unknown lr_schedule: {kind!r} (use none, linear, cosine)")
+    t = (step - 1) / float(total_steps - 1)
+    if k == "linear":
+        return 1.0 + (end_ratio - 1.0) * t
+    # cosine: 1 -> end_ratio
+    return end_ratio + (1.0 - end_ratio) * 0.5 * (1.0 + math.cos(math.pi * t))
+
+
 def train() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_root = Path.cwd() / config.output_subdir
@@ -103,7 +118,7 @@ def train() -> None:
     logger.info(
         "train start | device={} | batch_size={} | steps={} | save_every={} | "
         "G_steps={} | D_steps={} | cwd={} | out={} | patho2_dir={} ({} files, {} patches) | "
-        "morph_dir={} ({} files, {} patches) | h5_max_open={}",
+        "morph_dir={} ({} files, {} patches) | h5_max_open={} | lr_schedule={} | lr_end_ratio={}",
         device,
         int(config.batch_size),
         config.total_steps,
@@ -119,6 +134,8 @@ def train() -> None:
         len(morph_paths),
         catalog_y.total_patches,
         config.h5_max_open_files,
+        getattr(config, "lr_schedule", "linear"),
+        float(getattr(config, "lr_schedule_end_ratio", 0.01)),
     )
 
     sampler_x = RandomMultiH5PatchSampler(
@@ -145,6 +162,11 @@ def train() -> None:
             betas=(config.beta1, config.beta2),
         )
 
+        base_lr_G = float(config.lr_G)
+        base_lr_D = float(config.lr_D)
+        lr_sched = getattr(config, "lr_schedule", "linear")
+        lr_end_ratio = float(getattr(config, "lr_schedule_end_ratio", 0.01))
+
         G_xy.train()
         G_yx.train()
         D_x.train()
@@ -160,6 +182,10 @@ def train() -> None:
         d_steps = max(1, int(config.discriminator_steps))
         pbar = tqdm(range(1, config.total_steps + 1), desc="train", unit="step")
         for step in pbar:
+            m = _lr_schedule_multiplier(step, config.total_steps, lr_sched, lr_end_ratio)
+            optimizer_G.param_groups[0]["lr"] = base_lr_G * m
+            optimizer_D.param_groups[0]["lr"] = base_lr_D * m
+
             loss_G_last: torch.Tensor | None = None
             for _ in range(g_steps):
                 x = sampler_x.sample_batch(bs)
