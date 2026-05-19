@@ -1,0 +1,22 @@
+[project]
+name = "wsi-gan"
+version = "0.1.0"
+description = "Unpaired patch CycleGAN on HDF5."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "h5py>=3.10",
+    "loguru>=0.7",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "scikit-learn>=1.4",
+    "torch>=2.2",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+wsi = ["pyvips>=2.2"]
+
+[dependency-groups]
+dev = []
