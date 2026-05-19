@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import argparse
 import math
 from pathlib import Path
 
@@ -17,7 +16,7 @@ from config import config
 from discriminator import PatchDiscriminator
 from generator import ResidualGenerator
 from losses import discriminator_loss, generator_gan_loss, cycle_consistency_loss
-from multi_h5_sampling import (
+from utils.multi_h5_sampling import (
     PatchIndexCatalog,
     RandomMultiH5PatchSampler,
     list_h5_paths,
@@ -38,7 +37,6 @@ def save_generated_preview(
     fake_y: torch.Tensor,
     fake_x: torch.Tensor,
 ) -> Path:
-    """Save first item of each batch as PNG (batch dim may be > 1)."""
     sub = out_dir / f"step_{step:06d}"
     sub.mkdir(parents=True, exist_ok=True)
     Image.fromarray(tensor_minus1_1_to_uint8_hwc(x[0:1])).save(sub / "x_real.png")
@@ -92,7 +90,6 @@ def save_loss_curve_png(
 
 
 def _lr_schedule_multiplier(step: int, total_steps: int, kind: str, end_ratio: float) -> float:
-    """Return multiplier in [end_ratio, 1] applied to initial Adam lrs (step is 1-based)."""
     k = (kind or "none").strip().lower()
     if k == "none" or total_steps <= 1:
         return 1.0
@@ -101,41 +98,42 @@ def _lr_schedule_multiplier(step: int, total_steps: int, kind: str, end_ratio: f
     t = (step - 1) / float(total_steps - 1)
     if k == "linear":
         return 1.0 + (end_ratio - 1.0) * t
-    # cosine: 1 -> end_ratio
     return end_ratio + (1.0 - end_ratio) * 0.5 * (1.0 + math.cos(math.pi * t))
 
 
-def train() -> None:
+def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_root = Path.cwd() / config.output_subdir
     out_root.mkdir(parents=True, exist_ok=True)
 
-    patho2_paths = list_h5_paths(Path(config.patho2_h5_dir), config.h5_glob)
-    morph_paths = list_h5_paths(Path(config.morph_h5_dir), config.h5_glob)
-    catalog_x = PatchIndexCatalog(patho2_paths, config.patches_key)
-    catalog_y = PatchIndexCatalog(morph_paths, config.patches_key)
+    h5_paths_x = list_h5_paths(h5_dir_x, config.h5_glob)
+    h5_paths_y = list_h5_paths(h5_dir_y, config.h5_glob)
+    catalog_x = PatchIndexCatalog(h5_paths_x, config.patches_key)
+    catalog_y = PatchIndexCatalog(h5_paths_y, config.patches_key)
+    lr_sched = config.lr_schedule
+    lr_end_ratio = float(config.lr_schedule_end_ratio)
 
     logger.info(
         "train start | device={} | batch_size={} | steps={} | save_every={} | "
-        "G_steps={} | D_steps={} | cwd={} | out={} | patho2_dir={} ({} files, {} patches) | "
-        "morph_dir={} ({} files, {} patches) | h5_max_open={} | lr_schedule={} | lr_end_ratio={}",
+        "g_updates_per_step={} | d_updates_per_step={} | cwd={} | out={} | h5_dir_x={} ({} files, {} patches) | "
+        "h5_dir_y={} ({} files, {} patches) | h5_max_open={} | lr_schedule={} | lr_end_ratio={}",
         device,
-        int(config.batch_size),
+        config.batch_size,
         config.total_steps,
         config.save_every,
-        int(config.generator_steps),
-        int(config.discriminator_steps),
+        config.g_updates_per_step,
+        config.d_updates_per_step,
         Path.cwd(),
         out_root.resolve(),
-        Path(config.patho2_h5_dir).resolve(),
-        len(patho2_paths),
+        h5_dir_x.resolve(),
+        len(h5_paths_x),
         catalog_x.total_patches,
-        Path(config.morph_h5_dir).resolve(),
-        len(morph_paths),
+        h5_dir_y.resolve(),
+        len(h5_paths_y),
         catalog_y.total_patches,
         config.h5_max_open_files,
-        getattr(config, "lr_schedule", "linear"),
-        float(getattr(config, "lr_schedule_end_ratio", 0.01)),
+        lr_sched,
+        lr_end_ratio,
     )
 
     sampler_x = RandomMultiH5PatchSampler(
@@ -164,8 +162,6 @@ def train() -> None:
 
         base_lr_G = float(config.lr_G)
         base_lr_D = float(config.lr_D)
-        lr_sched = getattr(config, "lr_schedule", "linear")
-        lr_end_ratio = float(getattr(config, "lr_schedule_end_ratio", 0.01))
 
         G_xy.train()
         G_yx.train()
@@ -178,14 +174,15 @@ def train() -> None:
         loss_plot_path = out_root / config.loss_curve_png
 
         bs = max(1, int(config.batch_size))
-        g_steps = max(1, int(config.generator_steps))
-        d_steps = max(1, int(config.discriminator_steps))
+        g_steps = max(1, int(config.g_updates_per_step))
+        d_steps = max(1, int(config.d_updates_per_step))
         pbar = tqdm(range(1, config.total_steps + 1), desc="train", unit="step")
         for step in pbar:
             m = _lr_schedule_multiplier(step, config.total_steps, lr_sched, lr_end_ratio)
             optimizer_G.param_groups[0]["lr"] = base_lr_G * m
             optimizer_D.param_groups[0]["lr"] = base_lr_D * m
-
+            
+            # Generator training
             loss_G_last: torch.Tensor | None = None
             for _ in range(g_steps):
                 x = sampler_x.sample_batch(bs)
@@ -207,6 +204,7 @@ def train() -> None:
                 optimizer_G.step()
                 loss_G_last = loss_G
 
+            # Discriminator training
             loss_D_last: torch.Tensor | None = None
             for _ in range(d_steps):
                 x = sampler_x.sample_batch(bs)
@@ -221,13 +219,13 @@ def train() -> None:
                 optimizer_D.step()
                 loss_D_last = loss_D
 
+            # Save Checkpoint and Loss Curve
             assert loss_G_last is not None and loss_D_last is not None
             g_val = float(loss_G_last.detach().cpu())
             d_val = float(loss_D_last.detach().cpu())
             hist_step.append(step)
             hist_loss_G.append(g_val)
             hist_loss_D.append(d_val)
-
             pbar.set_postfix(G=g_val, D=d_val, refresh=False)
 
             if step % config.save_every == 0:
@@ -263,5 +261,25 @@ def train() -> None:
         logger.success("train finished | steps={}", config.total_steps)
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Train patch CycleGAN on two HDF5 patch directories.",
+    )
+    p.add_argument(
+        "--h5-dir-x",
+        type=Path,
+        required=True,
+        help="HDF5 directory for domain X",
+    )
+    p.add_argument(
+        "--h5-dir-y",
+        type=Path,
+        required=True,
+        help="HDF5 directory for domain Y",
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    train()
+    args = parse_args()
+    train(args.h5_dir_x, args.h5_dir_y)

@@ -1,11 +1,3 @@
-"""Random patch sampling from many HDF5 slide files in one directory.
-
-Each training step picks one flat index uniformly from all patches across files,
-then maps it to (file, row). Open HDF5 handles are cached with a small LRU cap
-to avoid reopening every step while bounding file-descriptor use.
-"""
-from __future__ import annotations
-
 from collections import OrderedDict
 from pathlib import Path
 
@@ -15,7 +7,6 @@ import torch
 
 
 def list_h5_paths(directory: Path, glob_pattern: str) -> list[Path]:
-    """Sorted paths under ``directory`` matching ``glob_pattern`` (e.g. ``*.h5``)."""
     paths = sorted(directory.glob(glob_pattern))
     if not paths:
         raise FileNotFoundError(
@@ -25,8 +16,6 @@ def list_h5_paths(directory: Path, glob_pattern: str) -> list[Path]:
 
 
 class PatchIndexCatalog:
-    """Per-file patch counts and mapping from one global index to (file_idx, row_idx)."""
-
     def __init__(self, h5_paths: list[Path], patches_dataset_key: str):
         self.files = list(h5_paths)
         counts: list[int] = []
@@ -41,7 +30,6 @@ class PatchIndexCatalog:
         self.total_patches = int(self._cumsum[-1])
 
     def file_and_row(self, flat_index: int) -> tuple[int, int]:
-        """Map ``flat_index`` in ``[0, total_patches)`` to file index and row index."""
         file_idx = int(np.searchsorted(self._cumsum, flat_index, side="right"))
         start = int(self._cumsum[file_idx - 1]) if file_idx > 0 else 0
         row_idx = flat_index - start
@@ -49,8 +37,6 @@ class PatchIndexCatalog:
 
 
 class RandomMultiH5PatchSampler:
-    """Draw one random patch per call, uniformly over all patches in the catalog."""
-
     def __init__(
         self,
         catalog: PatchIndexCatalog,
@@ -86,7 +72,6 @@ class RandomMultiH5PatchSampler:
         return t.to(self._device)
 
     def sample_batch(self, batch_size: int) -> torch.Tensor:
-        """Stack ``batch_size`` independent random patches as ``(B, 3, H, W)``."""
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
         chunks = [self.sample() for _ in range(batch_size)]
