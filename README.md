@@ -11,7 +11,7 @@ uv sync
 Set the HDF5 dataset key in `config.py` to match your slides (default: `config.patches_key = "cache/512/patches"`). 
 Training reads that key from every `.h5` under `--h5-dir-x` and `--h5-dir-y`.
 ```
-uv run python train.py --h5-dir-x /path/to/domain_x --h5-dir-y /path/to/domain_y
+uv run python train.py --h5-dir-x ./h5_x --h5-dir-y ./h5_y
 ```
 ## Apply generator to HDF5 patches (domain X → Y)
 `--which xy` → **G_xy** (X→Y).
@@ -20,5 +20,5 @@ uv run python train.py --h5-dir-x /path/to/domain_x --h5-dir-y /path/to/domain_y
 - **out:** `cache/512/gan/patches` (`--dst-key`; existing dataset is replaced)
 - **montage:** `{stem}_gan_montage_before.png` / `{stem}_gan_montage.png` (uses `cache/512/coordinates` if present)
 ```bash
-uv run python transform_h5_patches_gan.py --checkpoint train_outputs/step_000100/checkpoint.pt --h5-dir /path/to/domain_x_h5 --which xy
+uv run python transform_h5_patches_gan.py --checkpoint train_outputs/step_000100/checkpoint.pt --h5-dir ./h5_x --which xy
 ```
