@@ -7,6 +7,13 @@ git clone git@github.com:S-murakami1/wsi_gan.git
 cd wsi-gan
 uv sync
 ```
+## Preprocessing
+
+Before training, preprocess whole-slide images using the following toolbox:
+
+https://github.com/technoplasm/wsi-toolbox/
+
+This toolbox is used for whole-slide image patch extraction and HDF5 generation.
 ## Training
 
 - Place the `.h5` files you want to train on into `./h5_x` and `./h5_y`.
