@@ -21,7 +21,10 @@ dependencies = [
 wsi = ["pyvips>=2.2"]
 
 [dependency-groups]
-dev = []
+dev = [
+    "black>=26.5.1",
+    "isort>=8.0.1",
+]
 
 [tool.uv.sources]
 torch = { index = "pytorch" }

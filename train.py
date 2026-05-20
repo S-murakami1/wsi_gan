@@ -8,14 +8,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from loguru import logger
 from PIL import Image
 from tqdm import tqdm
-from loguru import logger
 
 from config import config
 from discriminator import PatchDiscriminator
 from generator import ResidualGenerator
-from losses import discriminator_loss, generator_gan_loss, cycle_consistency_loss
+from losses import cycle_consistency_loss, discriminator_loss, generator_gan_loss
 from utils.multi_h5_sampling import (
     PatchIndexCatalog,
     RandomMultiH5PatchSampler,
@@ -41,8 +41,12 @@ def save_generated_preview(
     sub.mkdir(parents=True, exist_ok=True)
     Image.fromarray(tensor_minus1_1_to_uint8_hwc(x[0:1])).save(sub / "x_real.png")
     Image.fromarray(tensor_minus1_1_to_uint8_hwc(y[0:1])).save(sub / "y_real.png")
-    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_y[0:1])).save(sub / "fake_y_Gxy.png")
-    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_x[0:1])).save(sub / "fake_x_Gyx.png")
+    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_y[0:1])).save(
+        sub / "fake_y_Gxy.png"
+    )
+    Image.fromarray(tensor_minus1_1_to_uint8_hwc(fake_x[0:1])).save(
+        sub / "fake_x_Gyx.png"
+    )
     return sub
 
 
@@ -89,7 +93,9 @@ def save_loss_curve_png(
     plt.close(fig)
 
 
-def _lr_schedule_multiplier(step: int, total_steps: int, kind: str, end_ratio: float) -> float:
+def _lr_schedule_multiplier(
+    step: int, total_steps: int, kind: str, end_ratio: float
+) -> float:
     k = (kind or "none").strip().lower()
     if k == "none" or total_steps <= 1:
         return 1.0
@@ -178,10 +184,12 @@ def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
         d_steps = max(1, int(config.d_updates_per_step))
         pbar = tqdm(range(1, config.total_steps + 1), desc="train", unit="step")
         for step in pbar:
-            m = _lr_schedule_multiplier(step, config.total_steps, lr_sched, lr_end_ratio)
+            m = _lr_schedule_multiplier(
+                step, config.total_steps, lr_sched, lr_end_ratio
+            )
             optimizer_G.param_groups[0]["lr"] = base_lr_G * m
             optimizer_D.param_groups[0]["lr"] = base_lr_D * m
-            
+
             # Generator training
             loss_G_last: torch.Tensor | None = None
             for _ in range(g_steps):
@@ -195,10 +203,9 @@ def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
                 loss_gan_yx = generator_gan_loss(D_x, fake_x)
                 loss_cycle_x = cycle_consistency_loss(x, rec_x)
                 loss_cycle_y = cycle_consistency_loss(y, rec_y)
-                loss_G = (
-                    config.lambda_gan * (loss_gan_xy + loss_gan_yx)
-                    + config.lambda_cycle * (loss_cycle_x + loss_cycle_y)
-                )
+                loss_G = config.lambda_gan * (
+                    loss_gan_xy + loss_gan_yx
+                ) + config.lambda_cycle * (loss_cycle_x + loss_cycle_y)
                 optimizer_G.zero_grad()
                 loss_G.backward()
                 optimizer_G.step()

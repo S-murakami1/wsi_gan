@@ -5,8 +5,12 @@ config = Bunch()
 # Data (train.py: --h5-dir-x / --h5-dir-y; transform_h5_patches_gan.py: --h5-dir)
 config.h5_glob = "*.h5"
 config.patches_key = "cache/512/patches"
-config.gan_patches_key = "cache/512/gan/patches" # Output key for transform_h5_patches_gan.py
-config.coordinates_key = "cache/512/coordinates" # Coordinates key for transform_h5_patches_gan.py
+config.gan_patches_key = (
+    "cache/512/gan/patches"  # Output key for transform_h5_patches_gan.py
+)
+config.coordinates_key = (
+    "cache/512/coordinates"  # Coordinates key for transform_h5_patches_gan.py
+)
 config.h5_max_open_files = 64
 
 # Output
@@ -30,7 +34,7 @@ config.beta2 = 0.999
 
 # LR schedule
 config.lr_schedule = "linear"  # "none" | "linear" | "cosine"
-config.lr_schedule_end_ratio = 0.01 # End ratio for linear schedule
+config.lr_schedule_end_ratio = 0.01  # End ratio for linear schedule
 
 # Loss weights (CycleGAN)
 config.lambda_cycle = 5.0

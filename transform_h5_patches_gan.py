@@ -5,13 +5,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 import torch
-from PIL import Image
 from loguru import logger
+from PIL import Image
 from tqdm import tqdm
 
 from config import config
 from generator import ResidualGenerator
-
 
 DEFAULT_CHECKPOINT = Path("train_outputs/step_010000/checkpoint.pt")
 DEFAULT_WHICH = "xy"
@@ -64,11 +63,11 @@ def load_coordinates_xy(h5: h5py.File, coord_key: str, n: int) -> np.ndarray | N
         return None
     arr = np.asarray(h5[coord_key][...])
     if arr.shape[0] != n:
-        raise ValueError(
-            f"{coord_key}: row count {arr.shape[0]} != patches {n}"
-        )
+        raise ValueError(f"{coord_key}: row count {arr.shape[0]} != patches {n}")
     if arr.ndim != 2 or arr.shape[1] < 2:
-        raise ValueError(f"{coord_key}: expected (N, 2+) for x,y columns, got shape {arr.shape}")
+        raise ValueError(
+            f"{coord_key}: expected (N, 2+) for x,y columns, got shape {arr.shape}"
+        )
     return arr[:, :2].astype(np.float64, copy=False)
 
 
@@ -118,7 +117,9 @@ def build_spatial_montage(
     w, h = pil.size
     m = max(w, h)
     if m > max_side:
-        pil = pil.resize((int(w * max_side / m), int(h * max_side / m)), Image.Resampling.LANCZOS)
+        pil = pil.resize(
+            (int(w * max_side / m), int(h * max_side / m)), Image.Resampling.LANCZOS
+        )
     return pil
 
 
@@ -140,7 +141,9 @@ def build_montage(
     w, h = pil.size
     m = max(w, h)
     if m > max_side:
-        pil = pil.resize((int(w * max_side / m), int(h * max_side / m)), Image.Resampling.LANCZOS)
+        pil = pil.resize(
+            (int(w * max_side / m), int(h * max_side / m)), Image.Resampling.LANCZOS
+        )
     return pil
 
 
@@ -199,7 +202,11 @@ def process_one_h5(
                 end = min(start + batch_size, n)
                 batch = np.asarray(src[start:end], dtype=np.uint8)
                 batch_t = (
-                    torch.from_numpy(batch).permute(0, 3, 1, 2).float().div_(255.0).to(device)
+                    torch.from_numpy(batch)
+                    .permute(0, 3, 1, 2)
+                    .float()
+                    .div_(255.0)
+                    .to(device)
                 )
                 small_before = torch.nn.functional.interpolate(
                     batch_t,
@@ -208,7 +215,11 @@ def process_one_h5(
                     align_corners=False,
                 )
                 small_before_u8 = (
-                    small_before.clamp(0.0, 1.0).mul(255.0).round().byte().permute(0, 2, 3, 1)
+                    small_before.clamp(0.0, 1.0)
+                    .mul(255.0)
+                    .round()
+                    .byte()
+                    .permute(0, 2, 3, 1)
                 )
 
                 xb = uint8_nhwc_to_model_input(batch).to(device)
@@ -233,7 +244,11 @@ def process_one_h5(
         path = h5_path.with_name(f"{h5_path.stem}_gan_montage{suffix}.png")
         if coords_xy is not None:
             img = build_spatial_montage(
-                thumbs, coords_xy, patch_h=height, patch_w=width, max_side=montage_max_side
+                thumbs,
+                coords_xy,
+                patch_h=height,
+                patch_w=width,
+                max_side=montage_max_side,
             )
         else:
             ncol = max(1, math.ceil(math.sqrt(n)))
@@ -243,7 +258,11 @@ def process_one_h5(
 
     before_path = _save_montage(thumbs_before, "_before")
     after_path = _save_montage(thumbs_after, "")
-    logger.success("montages saved | before={} | after={}", before_path.resolve(), after_path.resolve())
+    logger.success(
+        "montages saved | before={} | after={}",
+        before_path.resolve(),
+        after_path.resolve(),
+    )
 
 
 def main() -> None:
