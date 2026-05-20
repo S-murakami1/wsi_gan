@@ -23,12 +23,12 @@ config.save_every = 100
 config.batch_size = 2
 
 # Updates per iteration
-config.g_updates_per_step = 2
+config.g_updates_per_step = 5
 config.d_updates_per_step = 1
 
 # Optimizer (Adam)
-config.lr_G = 2e-4
-config.lr_D = 2e-4
+config.lr_G = 1e-4
+config.lr_D = 1e-4
 config.beta1 = 0.5
 config.beta2 = 0.999
 
