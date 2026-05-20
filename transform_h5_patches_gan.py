@@ -13,9 +13,7 @@ from config import config
 from generator import ResidualGenerator
 
 
-DST_KEY_DEFAULT = "cache/512/gan/patches"
-COORD_KEY_DEFAULT = "cache/512/coordinates"
-DEFAULT_CHECKPOINT = Path("./train_outputs/step_000100/checkpoint.pt")
+DEFAULT_CHECKPOINT = Path("train_outputs/step_010000/checkpoint.pt")
 DEFAULT_WHICH = "xy"
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_THUMB = 48
@@ -156,7 +154,6 @@ def process_one_h5(
     thumb_size: int,
     montage_max_side: int,
     coord_key: str | None,
-    no_spatial_montage: bool,
 ) -> None:
     with h5py.File(h5_path, "r+") as f:
         if src_key not in f:
@@ -168,7 +165,7 @@ def process_one_h5(
         logger.info("{} | patches={} shape={}", h5_path.name, n, (height, width, c))
 
         coords_xy: np.ndarray | None = None
-        if coord_key and not no_spatial_montage:
+        if coord_key:
             coords_xy = load_coordinates_xy(f, coord_key, n)
             if coords_xy is not None:
                 logger.info("{} | spatial montage from {}", h5_path.name, coord_key)
@@ -264,8 +261,6 @@ def main() -> None:
         help="Directory containing HDF5 slide files",
     )
     parser.add_argument("--glob", type=str, default=config.h5_glob)
-    parser.add_argument("--src-key", type=str, default=config.patches_key)
-    parser.add_argument("--dst-key", type=str, default=DST_KEY_DEFAULT)
     parser.add_argument(
         "--which",
         choices=("xy", "yx"),
@@ -289,35 +284,21 @@ def main() -> None:
         default=DEFAULT_MONTAGE_MAX_SIDE,
         help="Max width/height of final montage PNG (downsampled if larger)",
     )
-    parser.add_argument(
-        "--coord-key",
-        type=str,
-        default=COORD_KEY_DEFAULT,
-        help=(
-            "HDF5 dataset path for (N,2+) patch top-left x,y in same pixel space as patches; "
-            "if missing, fall back to index grid montage"
-        ),
-    )
-    parser.add_argument(
-        "--no-spatial-montage",
-        action="store_true",
-        help="Always use index grid montage even if coordinates exist",
-    )
-    parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args()
 
-    if not args.checkpoint.is_file():
-        raise SystemExit(f"Checkpoint not found: {args.checkpoint.resolve()}")
+    checkpoint = args.checkpoint
+    src_key = config.patches_key
+    dst_key = config.gan_patches_key
+    coord_key_cfg = (config.coordinates_key or "").strip() or None
 
-    device = torch.device(
-        args.device
-        if args.device
-        else ("cuda" if torch.cuda.is_available() else "cpu")
-    )
+    if not checkpoint.is_file():
+        raise SystemExit(f"Checkpoint not found: {checkpoint.resolve()}")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     try:
-        ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
+        ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
     except TypeError:
-        ckpt = torch.load(args.checkpoint, map_location=device)
+        ckpt = torch.load(checkpoint, map_location=device)
     key = "G_xy" if args.which == "xy" else "G_yx"
     if key not in ckpt:
         raise KeyError(f"Checkpoint missing {key}; keys: {list(ckpt.keys())}")
@@ -333,28 +314,25 @@ def main() -> None:
     logger.info(
         "apply {} | checkpoint={} | files={} | src={} -> dst={} | device={} | bs={}",
         key,
-        args.checkpoint.resolve(),
+        checkpoint.resolve(),
         len(paths),
-        args.src_key,
-        args.dst_key,
+        src_key,
+        dst_key,
         device,
         args.batch_size,
     )
-
-    coord_key = (args.coord_key or "").strip() or None
 
     for p in tqdm(paths, desc="h5 files", unit="file"):
         process_one_h5(
             p,
             G,
             device,
-            args.src_key,
-            args.dst_key,
+            src_key,
+            dst_key,
             batch_size=max(1, args.batch_size),
             thumb_size=max(8, args.thumb),
             montage_max_side=max(256, args.montage_max_side),
-            coord_key=coord_key,
-            no_spatial_montage=bool(args.no_spatial_montage),
+            coord_key=coord_key_cfg,
         )
 
 

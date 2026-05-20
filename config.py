@@ -5,6 +5,8 @@ config = Bunch()
 # Data (train.py: --h5-dir-x / --h5-dir-y; transform_h5_patches_gan.py: --h5-dir)
 config.h5_glob = "*.h5"
 config.patches_key = "cache/512/patches"
+config.gan_patches_key = "cache/512/gan/patches" # Output key for transform_h5_patches_gan.py
+config.coordinates_key = "cache/512/coordinates" # Coordinates key for transform_h5_patches_gan.py
 config.h5_max_open_files = 64
 
 # Output

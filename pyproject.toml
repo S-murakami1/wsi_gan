@@ -12,6 +12,8 @@ dependencies = [
     "pillow>=10.0",
     "scikit-learn>=1.4",
     "torch>=2.2",
+    "torchaudio>=2.11.0",
+    "torchvision>=0.26.0",
     "tqdm>=4.66",
 ]
 
@@ -20,3 +22,12 @@ wsi = ["pyvips>=2.2"]
 
 [dependency-groups]
 dev = []
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+torchaudio = { index = "pytorch" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu129"
