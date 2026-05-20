@@ -35,7 +35,7 @@ uv run python train.py --h5-dir-x ./h5_x --h5-dir-y ./h5_y
 
 
 ```bash
-uv run python transform_h5_patches_gan.py --checkpoint train_outputs/step_000100/checkpoint.pt --h5-dir ./h5_x --which xy
+uv run python transform_h5_patches_gan.py --checkpoint train_outputs/step_010000/checkpoint.pt --h5-dir ./h5_x --which xy
 ```
 `--which xy` → **G_xy** (X→Y).  
 `--which yx` → **G_yx** (Y→X).
