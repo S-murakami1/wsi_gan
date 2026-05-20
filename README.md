@@ -26,6 +26,7 @@ Training reads that key from every `.h5` file under `--h5-dir-x` and `--h5-dir-y
 uv run python train.py --h5-dir-x ./h5_x --h5-dir-y ./h5_y
 ```
 ## Apply generator to HDF5 patches (domain X → Y)
+After training, apply the generator to HDF5 patches.
 - Set the HDF5 dataset key in `config.py` to match the slides containing image patches  
 (default: `config.patches_key = "cache/512/patches"`).
 - Set the HDF5 dataset key in `config.py` to match the slides containing coordinate information  
