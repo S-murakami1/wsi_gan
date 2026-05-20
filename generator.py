@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from loguru import logger
 
+
 class ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
@@ -10,7 +11,7 @@ class ConvBlock(nn.Module):
             nn.ReflectionPad2d(1),
             nn.Conv2d(in_ch, out_ch, kernel_size=3),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.InstanceNorm2d(out_ch)
+            nn.InstanceNorm2d(out_ch),
         )
 
     def forward(self, x):
@@ -22,48 +23,40 @@ class ResidualGenerator(nn.Module):
         super().__init__()
 
         self.enc1 = nn.Sequential(
-            ConvBlock(in_ch, base_ch),
-            ConvBlock(base_ch, base_ch)
+            ConvBlock(in_ch, base_ch), ConvBlock(base_ch, base_ch)
         )
         self.enc2 = nn.Sequential(
-            ConvBlock(base_ch, base_ch * 2),
-            ConvBlock(base_ch * 2, base_ch * 2)
+            ConvBlock(base_ch, base_ch * 2), ConvBlock(base_ch * 2, base_ch * 2)
         )
         self.enc3 = nn.Sequential(
-            ConvBlock(base_ch * 2, base_ch * 4),
-            ConvBlock(base_ch * 4, base_ch * 4)
+            ConvBlock(base_ch * 2, base_ch * 4), ConvBlock(base_ch * 4, base_ch * 4)
         )
         self.enc4 = nn.Sequential(
-            ConvBlock(base_ch * 4, base_ch * 8),
-            ConvBlock(base_ch * 8, base_ch * 8)
+            ConvBlock(base_ch * 4, base_ch * 8), ConvBlock(base_ch * 8, base_ch * 8)
         )
 
         self.bottom = nn.Sequential(
-            ConvBlock(base_ch * 8, base_ch * 16),
-            ConvBlock(base_ch * 16, base_ch * 16)
+            ConvBlock(base_ch * 8, base_ch * 16), ConvBlock(base_ch * 16, base_ch * 16)
         )
 
         self.dec4 = nn.Sequential(
             ConvBlock(base_ch * 16 + base_ch * 8, base_ch * 8),
-            ConvBlock(base_ch * 8, base_ch * 8)
+            ConvBlock(base_ch * 8, base_ch * 8),
         )
         self.dec3 = nn.Sequential(
             ConvBlock(base_ch * 8 + base_ch * 4, base_ch * 4),
-            ConvBlock(base_ch * 4, base_ch * 4)
+            ConvBlock(base_ch * 4, base_ch * 4),
         )
         self.dec2 = nn.Sequential(
             ConvBlock(base_ch * 4 + base_ch * 2, base_ch * 2),
-            ConvBlock(base_ch * 2, base_ch * 2)
+            ConvBlock(base_ch * 2, base_ch * 2),
         )
         self.dec1 = nn.Sequential(
-            ConvBlock(base_ch * 2 + base_ch, base_ch),
-            ConvBlock(base_ch, base_ch)
+            ConvBlock(base_ch * 2 + base_ch, base_ch), ConvBlock(base_ch, base_ch)
         )
 
         self.out_conv = nn.Sequential(
-            nn.ReflectionPad2d(1),
-            nn.Conv2d(base_ch, in_ch, kernel_size=3),
-            nn.Tanh()
+            nn.ReflectionPad2d(1), nn.Conv2d(base_ch, in_ch, kernel_size=3), nn.Tanh()
         )
 
     def down(self, x):
@@ -96,6 +89,7 @@ class ResidualGenerator(nn.Module):
 
         out = x + 2.0 * residual
         return out
+
 
 if __name__ == "__main__":
     x = torch.randn(1, 3, 512, 512)
