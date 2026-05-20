@@ -8,9 +8,15 @@ cd wsi-gan
 uv sync
 ```
 ## Training
-Set the HDF5 dataset key in `config.py` to match your slides (default: `config.patches_key = "cache/512/patches"`). 
-Training reads that key from every `.h5` under `--h5-dir-x` and `--h5-dir-y`.
-```
+
+Place the `.h5` files you want to train on into `./h5_x` and `./h5_y`.
+
+Set the HDF5 dataset key in `config.py` to match your slides  
+(default: `config.patches_key = "cache/512/patches"`).
+
+Training reads that key from every `.h5` file under `--h5-dir-x` and `--h5-dir-y`.
+
+```bash
 uv run python train.py --h5-dir-x ./h5_x --h5-dir-y ./h5_y
 ```
 ## Apply generator to HDF5 patches (domain X → Y)
