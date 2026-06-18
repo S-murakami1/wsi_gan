@@ -16,11 +16,17 @@ from config import config
 from discriminator import PatchDiscriminator
 from generator import ResidualGenerator
 from losses import cycle_consistency_loss, discriminator_loss, generator_gan_loss
+from utils.checkpoint import (
+    TrainingState,
+    resolve_resume,
+    save_training_checkpoint,
+)
 from utils.multi_h5_sampling import (
+    MultiH5PatchSampler,
     PatchIndexCatalog,
-    RandomMultiH5PatchSampler,
     list_h5_paths,
 )
+from utils.seed import set_seed
 
 
 def tensor_minus1_1_to_uint8_hwc(t: torch.Tensor) -> np.ndarray:
@@ -48,30 +54,6 @@ def save_generated_preview(
         sub / "fake_x_Gyx.png"
     )
     return sub
-
-
-def save_training_checkpoint(
-    path: Path,
-    step: int,
-    G_xy: torch.nn.Module,
-    G_yx: torch.nn.Module,
-    D_x: torch.nn.Module,
-    D_y: torch.nn.Module,
-    optimizer_G: torch.optim.Optimizer,
-    optimizer_D: torch.optim.Optimizer,
-) -> None:
-    torch.save(
-        {
-            "step": step,
-            "G_xy": G_xy.state_dict(),
-            "G_yx": G_yx.state_dict(),
-            "D_x": D_x.state_dict(),
-            "D_y": D_y.state_dict(),
-            "optimizer_G": optimizer_G.state_dict(),
-            "optimizer_D": optimizer_D.state_dict(),
-        },
-        path,
-    )
 
 
 def save_loss_curve_png(
@@ -107,7 +89,15 @@ def _lr_schedule_multiplier(
     return end_ratio + (1.0 - end_ratio) * 0.5 * (1.0 + math.cos(math.pi * t))
 
 
-def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
+def train(
+    h5_dir_x: Path,
+    h5_dir_y: Path,
+    resume: Path | None = None,
+    seed: int | None = None,
+) -> None:
+    effective_seed = config.seed if seed is None else seed
+    set_seed(effective_seed)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_root = Path.cwd() / config.output_subdir
     out_root.mkdir(parents=True, exist_ok=True)
@@ -121,7 +111,8 @@ def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
 
     logger.info(
         "train start | device={} | batch_size={} | steps={} | save_every={} | "
-        "g_updates_per_step={} | d_updates_per_step={} | cwd={} | out={} | h5_dir_x={} ({} files, {} patches) | "
+        "g_updates_per_step={} | d_updates_per_step={} | cwd={} | out={} | resume={} | seed={} | "
+        "h5_dir_x={} ({} files, {} patches) | "
         "h5_dir_y={} ({} files, {} patches) | h5_max_open={} | lr_schedule={} | lr_end_ratio={}",
         device,
         config.batch_size,
@@ -131,6 +122,8 @@ def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
         config.d_updates_per_step,
         Path.cwd(),
         out_root.resolve(),
+        resume.resolve() if resume else None,
+        effective_seed,
         h5_dir_x.resolve(),
         len(h5_paths_x),
         catalog_x.total_patches,
@@ -142,11 +135,19 @@ def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
         lr_end_ratio,
     )
 
-    sampler_x = RandomMultiH5PatchSampler(
-        catalog_x, config.patches_key, device, config.h5_max_open_files
+    sampler_x = MultiH5PatchSampler(
+        catalog_x,
+        config.patches_key,
+        device,
+        config.h5_max_open_files,
+        seed=effective_seed,
     )
-    sampler_y = RandomMultiH5PatchSampler(
-        catalog_y, config.patches_key, device, config.h5_max_open_files
+    sampler_y = MultiH5PatchSampler(
+        catalog_y,
+        config.patches_key,
+        device,
+        config.h5_max_open_files,
+        seed=None if effective_seed is None else effective_seed + 1,
     )
 
     try:
@@ -174,15 +175,31 @@ def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
         D_x.train()
         D_y.train()
 
-        hist_step: list[int] = []
-        hist_loss_G: list[float] = []
-        hist_loss_D: list[float] = []
+        state = TrainingState(
+            G_xy, G_yx, D_x, D_y, optimizer_G, optimizer_D, sampler_x, sampler_y
+        )
+        resume_info = resolve_resume(
+            resume, device, state, config.total_steps, seed=effective_seed
+        )
+        if resume_info is None:
+            return
+
+        hist_step = resume_info.hist_step
+        hist_loss_G = resume_info.hist_loss_G
+        hist_loss_D = resume_info.hist_loss_D
+        start_step = resume_info.start_step
         loss_plot_path = out_root / config.loss_curve_png
 
         bs = max(1, int(config.batch_size))
         g_steps = max(1, int(config.g_updates_per_step))
         d_steps = max(1, int(config.d_updates_per_step))
-        pbar = tqdm(range(1, config.total_steps + 1), desc="train", unit="step")
+        pbar = tqdm(
+            range(start_step, config.total_steps + 1),
+            desc="train",
+            unit="step",
+            initial=start_step - 1,
+            total=config.total_steps,
+        )
         for step in pbar:
             m = _lr_schedule_multiplier(
                 step, config.total_steps, lr_sched, lr_end_ratio
@@ -244,12 +261,11 @@ def train(h5_dir_x: Path, h5_dir_y: Path) -> None:
                 save_training_checkpoint(
                     ckpt_path,
                     step,
-                    G_xy,
-                    G_yx,
-                    D_x,
-                    D_y,
-                    optimizer_G,
-                    optimizer_D,
+                    state,
+                    hist_step,
+                    hist_loss_G,
+                    hist_loss_D,
+                    seed=effective_seed,
                 )
                 save_loss_curve_png(loss_plot_path, hist_step, hist_loss_G, hist_loss_D)
                 logger.info(
@@ -284,9 +300,21 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="HDF5 directory for domain Y",
     )
+    p.add_argument(
+        "--resume",
+        type=Path,
+        default=None,
+        help="Checkpoint path to resume training (e.g. train_outputs/step_000100/checkpoint.pt)",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed (default: config.seed)",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    train(args.h5_dir_x, args.h5_dir_y)
+    train(args.h5_dir_x, args.h5_dir_y, resume=args.resume, seed=args.seed)

@@ -12,6 +12,7 @@ config.coordinates_key = (
     "cache/512/coordinates"  # Coordinates key for transform_h5_patches_gan.py
 )
 config.h5_max_open_files = 64
+config.seed = 42
 
 # Output
 config.output_subdir = "train_outputs"
