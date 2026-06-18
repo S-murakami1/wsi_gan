@@ -15,17 +15,12 @@ from tqdm import tqdm
 from config import config
 from discriminator import PatchDiscriminator
 from generator import ResidualGenerator
-from losses import cycle_consistency_loss, discriminator_loss, generator_gan_loss
-from utils.checkpoint import (
-    TrainingState,
-    resolve_resume,
-    save_training_checkpoint,
-)
-from utils.multi_h5_sampling import (
-    MultiH5PatchSampler,
-    PatchIndexCatalog,
-    list_h5_paths,
-)
+from losses import (cycle_consistency_loss, discriminator_loss,
+                    generator_gan_loss)
+from utils.checkpoint import (TrainingState, resolve_resume,
+                              save_training_checkpoint)
+from utils.multi_h5_sampling import (MultiH5PatchSampler, PatchIndexCatalog,
+                                     list_h5_paths)
 from utils.seed import set_seed
 
 

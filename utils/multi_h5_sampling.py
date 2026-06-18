@@ -88,9 +88,7 @@ class MultiH5PatchSampler:
 
     def _start_epoch(self) -> None:
         self.epoch += 1
-        self._order = torch.randperm(
-            self._catalog.total_patches, generator=self._rng
-        )
+        self._order = torch.randperm(self._catalog.total_patches, generator=self._rng)
         self._pos = 0
 
     def state_dict(self) -> dict[str, object]:
