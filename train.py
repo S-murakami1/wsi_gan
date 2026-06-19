@@ -228,8 +228,9 @@ def train(
             for _ in range(d_steps):
                 x = sampler_x.sample_batch(bs)
                 y = sampler_y.sample_batch(bs)
-                fake_y = G_xy(x)
-                fake_x = G_yx(y)
+                with torch.no_grad():
+                    fake_y = G_xy(x)
+                    fake_x = G_yx(y)
                 loss_D_y = discriminator_loss(D_y, y, fake_y)
                 loss_D_x = discriminator_loss(D_x, x, fake_x)
                 loss_D = config.lambda_discriminator * (loss_D_x + loss_D_y)
