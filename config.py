@@ -19,8 +19,8 @@ config.output_subdir = "train_outputs"
 config.loss_curve_png = "loss_curve.png"
 
 # Training loop
-config.total_steps = 10000
-config.save_every = 100
+config.total_steps = 100000
+config.save_every = 1000
 config.batch_size = 2
 
 # Updates per iteration
